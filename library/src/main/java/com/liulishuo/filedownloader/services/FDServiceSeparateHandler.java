@@ -31,8 +31,6 @@ import com.liulishuo.filedownloader.util.FileDownloadLog;
 import java.lang.ref.WeakReference;
 
 /**
- * Created by Jacksgong on 4/17/16.
- * <p/>
  * For handling the case of the FileDownloadService runs in separate `:filedownloader` process.
  */
 public class FDServiceSeparateHandler extends IFileDownloadIPCService.Stub
@@ -83,9 +81,10 @@ public class FDServiceSeparateHandler extends IFileDownloadIPCService.Stub
     @Override
     public void start(String url, String path, boolean pathAsDirectory, int callbackProgressTimes,
                       int callbackProgressMinIntervalMillis, int autoRetryTimes, boolean forceReDownload,
-                      FileDownloadHeader header) throws RemoteException {
+                      FileDownloadHeader header, boolean isWifiRequired) throws RemoteException {
         downloadManager.start(url, path, pathAsDirectory, callbackProgressTimes,
-                callbackProgressMinIntervalMillis, autoRetryTimes, forceReDownload, header);
+                callbackProgressMinIntervalMillis, autoRetryTimes, forceReDownload, header,
+                isWifiRequired);
     }
 
     @Override
@@ -135,6 +134,16 @@ public class FDServiceSeparateHandler extends IFileDownloadIPCService.Stub
         if (this.wService != null && this.wService.get() != null) {
             this.wService.get().stopForeground(removeNotification);
         }
+    }
+
+    @Override
+    public boolean clearTaskData(int id) throws RemoteException {
+        return downloadManager.clearTaskData(id);
+    }
+
+    @Override
+    public void clearAllTaskData() throws RemoteException {
+        downloadManager.clearAllTaskData();
     }
 
     @Override

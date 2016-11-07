@@ -25,13 +25,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Created by Jacksgong on 12/21/15.
- * <p/>
  * Storing all tasks in processing in the Main-Process.
  */
 @SuppressWarnings("UnusedReturnValue")
 public class FileDownloadList {
-
 
     private final static class HolderClass {
         private final static FileDownloadList INSTANCE = new FileDownloadList();
@@ -41,18 +38,18 @@ public class FileDownloadList {
         return HolderClass.INSTANCE;
     }
 
-    private final ArrayList<BaseDownloadTask> list;
+    private final ArrayList<BaseDownloadTask.IRunningTask> mList;
 
     private FileDownloadList() {
-        list = new ArrayList<>();
+        mList = new ArrayList<>();
     }
 
     boolean isEmpty() {
-        return list.isEmpty();
+        return mList.isEmpty();
     }
 
     int size() {
-        return list.size();
+        return mList.size();
     }
 
     /**
@@ -61,9 +58,9 @@ public class FileDownloadList {
      */
     int count(final int id) {
         int size = 0;
-        synchronized (list) {
-            for (BaseDownloadTask baseDownloadTask : list) {
-                if (baseDownloadTask.getId() == id) {
+        synchronized (mList) {
+            for (BaseDownloadTask.IRunningTask task : mList) {
+                if (task.is(id)) {
                     size++;
                 }
             }
@@ -71,25 +68,25 @@ public class FileDownloadList {
         return size;
     }
 
-    public BaseDownloadTask get(final int id) {
-        synchronized (list) {
-            for (BaseDownloadTask baseDownloadTask : list) {
+    public BaseDownloadTask.IRunningTask get(final int id) {
+        synchronized (mList) {
+            for (BaseDownloadTask.IRunningTask task : mList) {
                 // when FileDownloadMgr#isDownloading
-                if (baseDownloadTask.getId() == id) {
-                    return baseDownloadTask;
+                if (task.is(id)) {
+                    return task;
                 }
             }
         }
         return null;
     }
 
-    List<BaseDownloadTask> getDownloadingList(final int id) {
-        final List<BaseDownloadTask> list = new ArrayList<>();
-        synchronized (this.list) {
-            for (BaseDownloadTask baseDownloadTask : this.list) {
-                if (baseDownloadTask.getId() == id &&
-                        !FileDownloadStatus.isOver(baseDownloadTask.getStatus())) {
-                    list.add(baseDownloadTask);
+    List<BaseDownloadTask.IRunningTask> getDownloadingList(final int id) {
+        final List<BaseDownloadTask.IRunningTask> list = new ArrayList<>();
+        synchronized (this.mList) {
+            for (BaseDownloadTask.IRunningTask task : this.mList) {
+                if (task.is(id) &&
+                        !task.isOver()) {
+                    list.add(task);
                 }
             }
         }
@@ -97,16 +94,16 @@ public class FileDownloadList {
         return list;
     }
 
-    boolean contains(final BaseDownloadTask download) {
-        return list.contains(download);
+    boolean contains(final BaseDownloadTask.IRunningTask download) {
+        return !mList.isEmpty() && mList.contains(download);
     }
 
-    List<BaseDownloadTask> copy(final FileDownloadListener listener) {
-        final List<BaseDownloadTask> targetList = new ArrayList<>();
-        synchronized (list) {
+    List<BaseDownloadTask.IRunningTask> copy(final FileDownloadListener listener) {
+        final List<BaseDownloadTask.IRunningTask> targetList = new ArrayList<>();
+        synchronized (mList) {
             // Prevent size changing
-            for (BaseDownloadTask task : list) {
-                if (task.getListener() == listener) {
+            for (BaseDownloadTask.IRunningTask task : mList) {
+                if (task.is(listener)) {
                     targetList.add(task);
                 }
             }
@@ -114,67 +111,77 @@ public class FileDownloadList {
         }
     }
 
-    BaseDownloadTask[] copy() {
-        synchronized (list) {
+    List<BaseDownloadTask.IRunningTask> assembleTasksToStart(int attachKey,
+                                                             FileDownloadListener listener) {
+        final List<BaseDownloadTask.IRunningTask> targetList = new ArrayList<>();
+        synchronized (mList) {
             // Prevent size changing
-            BaseDownloadTask[] copy = new BaseDownloadTask[list.size()];
-            return list.toArray(copy);
+            for (BaseDownloadTask.IRunningTask task : mList) {
+                if (task.getOrigin().getListener() == listener && !task.getOrigin().isAttached()) {
+                    task.setAttachKeyByQueue(attachKey);
+                    targetList.add(task);
+                }
+            }
+            return targetList;
+        }
+    }
+
+    BaseDownloadTask.IRunningTask[] copy() {
+        synchronized (mList) {
+            // Prevent size changing
+            BaseDownloadTask.IRunningTask[] copy = new BaseDownloadTask.IRunningTask[mList.size()];
+            return mList.toArray(copy);
         }
     }
 
     /**
      * Divert all data in list 2 destination list
      */
-    void divert(@SuppressWarnings("SameParameterValue") final List<BaseDownloadTask> destination) {
-        synchronized (list) {
-            destination.addAll(list);
-            list.clear();
+    void divertAndIgnoreDuplicate(@SuppressWarnings("SameParameterValue") final List<BaseDownloadTask.IRunningTask>
+                                          destination) {
+        synchronized (mList) {
+            for (BaseDownloadTask.IRunningTask iRunningTask : mList) {
+                if (!destination.contains(iRunningTask)) {
+                    destination.add(iRunningTask);
+                }
+            }
+            mList.clear();
         }
     }
 
     /**
      * @param willRemoveDownload will be remove
      */
-    public boolean remove(final BaseDownloadTask willRemoveDownload, MessageSnapshot snapshot) {
+    public boolean remove(final BaseDownloadTask.IRunningTask willRemoveDownload,
+                          MessageSnapshot snapshot) {
         final byte removeByStatus = snapshot.getStatus();
         boolean succeed;
-        synchronized (list) {
-            succeed = list.remove(willRemoveDownload);
+        synchronized (mList) {
+            succeed = mList.remove(willRemoveDownload);
         }
         if (FileDownloadLog.NEED_LOG) {
-            if (list.size() == 0) {
-                FileDownloadLog.v(this, "remove %s left %d %d", willRemoveDownload, removeByStatus, list.size());
+            if (mList.size() == 0) {
+                FileDownloadLog.v(this, "remove %s left %d %d",
+                        willRemoveDownload, removeByStatus, mList.size());
             }
         }
 
         if (succeed) {
+            final IFileDownloadMessenger messenger = willRemoveDownload.getMessageHandler().
+                    getMessenger();
             // Notify 2 Listener
             switch (removeByStatus) {
                 case FileDownloadStatus.warn:
-                    willRemoveDownload.getMessenger().notifyWarn(snapshot);
+                    messenger.notifyWarn(snapshot);
                     break;
                 case FileDownloadStatus.error:
-                    willRemoveDownload.getMessenger().notifyError(snapshot);
+                    messenger.notifyError(snapshot);
                     break;
                 case FileDownloadStatus.paused:
-                    willRemoveDownload.getMessenger().notifyPaused(snapshot);
+                    messenger.notifyPaused(snapshot);
                     break;
                 case FileDownloadStatus.completed:
-                    Throwable ex = null;
-                    try {
-                        willRemoveDownload.getMessenger().
-                                notifyBlockComplete(MessageSnapshotTaker.
-                                        takeBlockCompleted(snapshot));
-                    } catch (Throwable e) {
-                        ex = e;
-                    }
-
-                    if (ex != null) {
-                        willRemoveDownload.getMessenger().
-                                notifyError(willRemoveDownload.catchException(ex));
-                    } else {
-                        willRemoveDownload.getMessenger().notifyCompleted(snapshot);
-                    }
+                    messenger.notifyBlockComplete(MessageSnapshotTaker.takeBlockCompleted(snapshot));
                     break;
             }
 
@@ -186,26 +193,38 @@ public class FileDownloadList {
         return succeed;
     }
 
-    void add(final BaseDownloadTask downloadInternal) {
+    void add(final BaseDownloadTask.IRunningTask task) {
+        if (!task.getOrigin().isAttached()) {
+            // if this task didn't attach to any key, this task must be an isolated task, so we
+            // generate a key and attache it to this task, make sure this task not be assembled by
+            // a queue.
+            task.setAttachKeyDefault();
+        }
 
-        if(downloadInternal.getMessenger().notifyBegin()){
-            ready(downloadInternal);
+        if (task.getMessageHandler().getMessenger().notifyBegin()) {
+            addUnchecked(task);
         }
     }
 
-    void ready(final BaseDownloadTask task) {
+    /**
+     * This method generally used for enqueuing the task which will be assembled by a queue.
+     *
+     * @see BaseDownloadTask.InQueueTask#enqueue()
+     */
+    void addUnchecked(final BaseDownloadTask.IRunningTask task) {
         if (task.isMarkedAdded2List()) {
             return;
         }
 
-        synchronized (list) {
-            if (list.contains(task)) {
+        synchronized (mList) {
+            if (mList.contains(task)) {
                 FileDownloadLog.w(this, "already has %s", task);
             } else {
                 task.markAdded2List();
-                list.add(task);
+                mList.add(task);
                 if (FileDownloadLog.NEED_LOG) {
-                    FileDownloadLog.v(this, "add list in all %s %d %d", task, task.getStatus(), list.size());
+                    FileDownloadLog.v(this, "add list in all %s %d %d", task,
+                            task.getOrigin().getStatus(), mList.size());
                 }
             }
         }

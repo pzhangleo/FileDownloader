@@ -16,29 +16,9 @@
 
 package com.liulishuo.filedownloader.message;
 
-import com.liulishuo.filedownloader.BaseDownloadTask;
-
 /**
- * Created by Jacksgong on 4/27/16.
- * <p/>
- * A Message for {@link com.liulishuo.filedownloader.FileDownloadListener}.
+ * If the snapshot implement this interface, it will be flowed directly, it means that it would be
+ * callback to the message station synchronize, not through the keep-flow-thread-pool.
  */
-public class FileDownloadMessage {
-    private final BaseDownloadTask task;
-
-    private final MessageSnapshot snapshot;
-
-    public FileDownloadMessage(BaseDownloadTask task, MessageSnapshot snapshot) {
-        this.task = task;
-        this.snapshot = snapshot;
-    }
-
-    public MessageSnapshot getSnapshot() {
-        return this.snapshot;
-    }
-
-
-    public BaseDownloadTask getTask() {
-        return this.task;
-    }
+public interface IFlowDirectly {
 }

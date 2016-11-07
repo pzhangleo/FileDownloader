@@ -21,12 +21,9 @@ import android.content.ContentValues;
 import com.liulishuo.filedownloader.util.FileDownloadUtils;
 
 /**
- * Created by Jacksgong on 9/24/15.
- * <p/>
- * The Download-Task-Model will be store in DB.
+ * The model of the downloading task will be used in the filedownloader database.
  *
- * @see com.liulishuo.filedownloader.services.FileDownloadDBHelper
- * @see com.liulishuo.filedownloader.services.FileDownloadDBOpenHelper
+ * @see com.liulishuo.filedownloader.services.FileDownloadDatabase
  */
 @SuppressWarnings("WeakerAccess")
 public class FileDownloadModel {

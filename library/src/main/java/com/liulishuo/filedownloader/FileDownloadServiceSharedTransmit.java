@@ -30,8 +30,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Created by Jacksgong on 4/17/16.
- * <p/>
  * This transmit layer is used for the FileDownloader-Process is shared the main process.
  * <p/>
  * If you want use this transmit and want the FileDownloadService share the main process, not in the
@@ -47,13 +45,14 @@ class FileDownloadServiceSharedTransmit implements
     @Override
     public boolean start(String url, String path, boolean pathAsDirectory, int callbackProgressTimes,
                          int callbackProgressMinIntervalMillis,
-                         int autoRetryTimes, boolean forceReDownload, FileDownloadHeader header) {
+                         int autoRetryTimes, boolean forceReDownload, FileDownloadHeader header,
+                         boolean isWifiRequired) {
         if (!isConnected()) {
             return DownloadServiceNotConnectedHelper.start(url, path, pathAsDirectory);
         }
 
         handler.start(url, path, pathAsDirectory, callbackProgressTimes, callbackProgressMinIntervalMillis,
-                autoRetryTimes, forceReDownload, header);
+                autoRetryTimes, forceReDownload, header, isWifiRequired);
         return true;
     }
 
@@ -178,6 +177,24 @@ class FileDownloadServiceSharedTransmit implements
         }
 
         return handler.setMaxNetworkThreadCount(count);
+    }
+
+    @Override
+    public boolean clearTaskData(int id) {
+        if (!isConnected()) {
+            return DownloadServiceNotConnectedHelper.clearTaskData(id);
+        }
+        return handler.clearTaskData(id);
+    }
+
+    @Override
+    public void clearAllTaskData() {
+        if (!isConnected()) {
+            DownloadServiceNotConnectedHelper.clearAllTaskData();
+            return;
+        }
+
+        handler.clearAllTaskData();
     }
 
     private FDServiceSharedHandler handler;

@@ -18,34 +18,29 @@ package com.liulishuo.filedownloader.services;
 
 import android.util.SparseArray;
 
+import com.liulishuo.filedownloader.util.FileDownloadExecutors;
 import com.liulishuo.filedownloader.util.FileDownloadLog;
 import com.liulishuo.filedownloader.util.FileDownloadProperties;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
- * Created by Jacksgong on 9/25/15.
- * <p/>
- * The thread pool for driving the download runnable.
+ * The thread pool for driving the downloading runnable, which real access the network.
  */
 class FileDownloadThreadPool {
 
     private SparseArray<FileDownloadRunnable> runnablePool = new SparseArray<>();
 
-    private ThreadPoolExecutor threadPool;
+    private ThreadPoolExecutor mThreadPool;
 
-    FileDownloadThreadPool(int maxNetworkThreadCount) {
-        if (maxNetworkThreadCount == 0) {
-            maxNetworkThreadCount = FileDownloadProperties.getImpl().DOWNLOAD_MAX_NETWORK_THREAD_COUNT;
-        } else {
-            maxNetworkThreadCount = FileDownloadProperties.
-                    getValidNetworkThreadCount(maxNetworkThreadCount);
-        }
+    private final String THREAD_PREFIX = "Network";
+    private int mMaxThreadCount;
 
-        threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(maxNetworkThreadCount);
+    FileDownloadThreadPool(final int maxNetworkThreadCount) {
+        mThreadPool = FileDownloadExecutors.newDefaultThreadPool(maxNetworkThreadCount, THREAD_PREFIX);
+        mMaxThreadCount = maxNetworkThreadCount;
     }
 
     public synchronized boolean setMaxNetworkThreadCount(int count) {
@@ -60,17 +55,18 @@ class FileDownloadThreadPool {
 
         if (FileDownloadLog.NEED_LOG) {
             FileDownloadLog.d(this, "change the max network thread count, from %d to %d",
-                    threadPool.getCorePoolSize(), validCount);
+                    mMaxThreadCount, validCount);
         }
 
-        final List<Runnable> taskQueue = threadPool.shutdownNow();
-        threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(validCount);
+        final List<Runnable> taskQueue = mThreadPool.shutdownNow();
+        mThreadPool = FileDownloadExecutors.newDefaultThreadPool(validCount, THREAD_PREFIX);
 
         if (taskQueue.size() > 0) {
             FileDownloadLog.w(this, "recreate the network thread pool and discard %d tasks",
                     taskQueue.size());
         }
 
+        mMaxThreadCount = validCount;
         return true;
     }
 
@@ -79,7 +75,7 @@ class FileDownloadThreadPool {
         synchronized (this) {
             runnablePool.put(runnable.getId(), runnable);
         }
-        threadPool.execute(runnable);
+        mThreadPool.execute(runnable);
 
         final int CHECK_THRESHOLD_VALUE = 600;
         if (mIgnoreCheckTimes >= CHECK_THRESHOLD_VALUE) {
@@ -96,7 +92,7 @@ class FileDownloadThreadPool {
             FileDownloadRunnable r = runnablePool.get(id);
             if (r != null) {
                 r.cancelRunnable();
-                boolean result = threadPool.remove(r);
+                boolean result = mThreadPool.remove(r);
                 if (FileDownloadLog.NEED_LOG) {
                     // If {@code result} is false, must be: the Runnable has been running before
                     // invoke this method.

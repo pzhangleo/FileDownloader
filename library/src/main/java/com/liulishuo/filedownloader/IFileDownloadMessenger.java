@@ -17,14 +17,12 @@
 package com.liulishuo.filedownloader;
 
 import com.liulishuo.filedownloader.message.MessageSnapshot;
-import com.liulishuo.filedownloader.model.FileDownloadHeader;
+import com.liulishuo.filedownloader.model.FileDownloadModel;
 import com.liulishuo.filedownloader.services.FileDownloadRunnable;
-
-import java.io.FileDescriptor;
+import com.liulishuo.filedownloader.stream.FileDownloadOutputStream;
+import com.liulishuo.filedownloader.util.FileDownloadHelper;
 
 /**
- * Created by Jacksgong on 12/21/15.
- *
  * @see com.liulishuo.filedownloader.model.FileDownloadStatus
  */
 interface IFileDownloadMessenger {
@@ -70,7 +68,7 @@ interface IFileDownloadMessenger {
      * <p/>
      * Fetching datum, and write to local disk.
      *
-     * @see FileDownloadRunnable#onProgress(long, long, FileDescriptor)
+     * @see FileDownloadRunnable#onProgress(long, long, FileDownloadOutputStream)
      */
     void notifyProgress(MessageSnapshot snapshot);
 
@@ -97,13 +95,12 @@ interface IFileDownloadMessenger {
      * There has already had some same Tasks(Same-URL & Same-SavePath) in Pending-Queue or is
      * running.
      *
-     * @see com.liulishuo.filedownloader.services.FileDownloadMgr#start(String, String, boolean, int, int, int, boolean, FileDownloadHeader)
-     * @see com.liulishuo.filedownloader.services.FileDownloadMgr#isDownloading(String, String)
+     * @see FileDownloadHelper#inspectAndInflowDownloading(int, FileDownloadModel, IThreadPoolMonitor, boolean)
      */
     void notifyWarn(MessageSnapshot snapshot);
 
     /**
-     * The task over.
+     * The task is over.
      * <p/>
      * Occur a exception, but don't has any chance to retry.
      *
@@ -115,7 +112,7 @@ interface IFileDownloadMessenger {
     void notifyError(MessageSnapshot snapshot);
 
     /**
-     * The task over.
+     * The task is over.
      * <p/>
      * Pause manually by {@link BaseDownloadTask#pause()}.
      *
@@ -124,7 +121,7 @@ interface IFileDownloadMessenger {
     void notifyPaused(MessageSnapshot snapshot);
 
     /**
-     * The task over.
+     * The task is over.
      * <p/>
      * Achieve complete ceremony.
      *
@@ -133,35 +130,37 @@ interface IFileDownloadMessenger {
     void notifyCompleted(MessageSnapshot snapshot);
 
     /**
-     * handover a message to {@link FileDownloadListener}.
+     * Handover a message to {@link FileDownloadListener}.
      */
     void handoverMessage();
 
     /**
-     * @return Whether handover a message to {@link FileDownloadListener} directly, do not need post
-     * to UI thread.
-     * @see BaseDownloadTask#syncCallback
+     * @return {@code true} if handover a message to {@link FileDownloadListener} directly(do not
+     * need to post the callback to the main thread).
+     * @see BaseDownloadTask#isSyncCallback()
      */
     boolean handoverDirectly();
-
-    /**
-     * @return Whether has receiver(bound task has listener) to receiver messages.
-     * @see BaseDownloadTask#getListener()
-     */
-    boolean hasReceiver();
 
     /**
      * @param task Re-appointment for this task, when this messenger has already accomplished the
      *             old one.
      */
-    void reAppointment(BaseDownloadTask task);
+    void reAppointment(BaseDownloadTask.IRunningTask task, BaseDownloadTask.LifeCycleCallback callback);
 
     /**
      * The 'block completed'(status) message will be handover in the non-UI thread and block the
      * 'completed'(status) message.
      *
-     * @return Whether the status of the current message is
+     * @return {@code true} if the status of the current message is
      * {@link com.liulishuo.filedownloader.model.FileDownloadStatus#blockComplete}.
      */
     boolean isBlockingCompleted();
+
+    /**
+     * Discard this messenger.
+     * <p>
+     * If this messenger is discarded, all messages sent by this messenger or feature messages
+     * handled by this messenger will be discard, no longer callback to the target Listener.
+     */
+    void discard();
 }

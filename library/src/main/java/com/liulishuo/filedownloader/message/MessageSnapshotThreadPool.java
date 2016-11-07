@@ -15,17 +15,15 @@
  */
 package com.liulishuo.filedownloader.message;
 
+import com.liulishuo.filedownloader.util.FileDownloadExecutors;
+
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executor;
 
 /**
- * Created by Jacksgong on 4/8/16.
- * <p/>
- * For guaranteeing only one-thread-pool for one-task, in other words, it's statuses only can be
- * progressed in  FIFO as far as a task concern.
+ * For guaranteeing only one-thread-pool for one-task, the task will be identified by its ID, make
+ * sure the same task will be invoked in FIFO.
  */
 public class MessageSnapshotThreadPool {
 
@@ -34,11 +32,11 @@ public class MessageSnapshotThreadPool {
     private final MessageSnapshotFlow.MessageReceiver receiver;
 
     MessageSnapshotThreadPool(@SuppressWarnings("SameParameterValue") final int poolCount,
-                                     MessageSnapshotFlow.MessageReceiver receiver) {
+                              MessageSnapshotFlow.MessageReceiver receiver) {
         this.receiver = receiver;
         executorList = new ArrayList<>();
         for (int i = 0; i < poolCount; i++) {
-            executorList.add(new FlowSingleExecutor());
+            executorList.add(new FlowSingleExecutor(i));
         }
     }
 
@@ -83,12 +81,12 @@ public class MessageSnapshotThreadPool {
         }
     }
 
-    public class FlowSingleExecutor extends ThreadPoolExecutor {
-
+    public class FlowSingleExecutor {
         private final List<Integer> enQueueTaskIdList = new ArrayList<>();
+        private final Executor mExecutor;
 
-        public FlowSingleExecutor() {
-            super(1, 1, 5, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
+        public FlowSingleExecutor(int index) {
+            mExecutor = FileDownloadExecutors.newDefaultThreadPool(1, "Flow-" + index);
         }
 
         public void enqueue(final int id) {
@@ -96,7 +94,7 @@ public class MessageSnapshotThreadPool {
         }
 
         public void execute(final MessageSnapshot snapshot) {
-            execute(new Runnable() {
+            mExecutor.execute(new Runnable() {
                 @Override
                 public void run() {
                     receiver.receive(snapshot);

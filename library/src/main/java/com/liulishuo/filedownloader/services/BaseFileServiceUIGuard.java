@@ -36,16 +36,14 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
- * Created by Jacksgong on 8/10/15.
- * <p/>
- * A UI-Guard in Main-Process for IPC. which is the only Class can access the other process in
+ * A UI-Guard in Main-Process for IPC, which is the only Object can access the other process in
  * Main-Process with Binder.
  */
 public abstract class BaseFileServiceUIGuard<CALLBACK extends Binder, INTERFACE extends IInterface>
         implements IFileDownloadServiceProxy, ServiceConnection {
 
     private final CALLBACK callback;
-    private INTERFACE service;
+    private volatile INTERFACE service;
     private final Class<?> serviceClass;
 
     private final HashMap<String, Object> uiCacheMap = new HashMap<>();

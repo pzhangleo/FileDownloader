@@ -16,18 +16,15 @@
 
 package com.liulishuo.filedownloader.message;
 
-import com.liulishuo.filedownloader.model.FileDownloadStatus;
-
 /**
- * Created by Jacksgong on 4/30/16.
- * <p/>
  * The internal message snapshot station.
+ * <p>
  * Making message snapshots keep flowing in order.
  */
 public class MessageSnapshotFlow {
 
-    private MessageSnapshotThreadPool flowThreadPool;
-    private MessageReceiver receiver;
+    private volatile MessageSnapshotThreadPool flowThreadPool;
+    private volatile MessageReceiver receiver;
 
     public final static class HolderClass {
         private final static MessageSnapshotFlow INSTANCE = new MessageSnapshotFlow();
@@ -39,22 +36,24 @@ public class MessageSnapshotFlow {
 
     public void setReceiver(MessageReceiver receiver) {
         this.receiver = receiver;
-        flowThreadPool = new MessageSnapshotThreadPool(5, receiver);
+        if (receiver == null) {
+            this.flowThreadPool = null;
+        } else {
+            this.flowThreadPool = new MessageSnapshotThreadPool(5, receiver);
+        }
     }
 
     public void inflow(final MessageSnapshot snapshot) {
-        switch (snapshot.getStatus()) {
-            case FileDownloadStatus.warn:
+        if (snapshot instanceof IFlowDirectly) {
+            if (receiver != null) {
                 receiver.receive(snapshot);
-                return;
-            case FileDownloadStatus.completed:
-                if (snapshot.isReusedDownloadedFile()) {
-                    receiver.receive(snapshot);
-                    return;
-                }
+            }
+        } else {
+            if (flowThreadPool != null) {
+                flowThreadPool.execute(snapshot);
+            }
         }
 
-        flowThreadPool.execute(snapshot);
     }
 
 

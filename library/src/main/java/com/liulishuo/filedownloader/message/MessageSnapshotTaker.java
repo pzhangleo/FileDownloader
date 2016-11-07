@@ -26,9 +26,7 @@ import com.liulishuo.filedownloader.util.FileDownloadUtils;
 import java.io.File;
 
 /**
- * Created by Jacksgong on 5/1/16.
- * <p/>
- * The factory for take message snapshots.
+ * The factory for taking message snapshots.
  */
 public class MessageSnapshotTaker {
 
@@ -36,43 +34,56 @@ public class MessageSnapshotTaker {
         return take(status, model, null);
     }
 
-    public static MessageSnapshot catchCanReusedOldFile(int id, File oldFile) {
+    public static MessageSnapshot catchCanReusedOldFile(int id, File oldFile, boolean flowDirectly) {
         final long totalBytes = oldFile.length();
         if (totalBytes > Integer.MAX_VALUE) {
-            return new LargeMessageSnapshot.CompletedSnapshot(id,
-                    FileDownloadStatus.completed, true, totalBytes);
+            if (flowDirectly) {
+                return new LargeMessageSnapshot.CompletedFlowDirectlySnapshot(id, true, totalBytes);
+            } else {
+                return new LargeMessageSnapshot.CompletedSnapshot(id, true, totalBytes);
+            }
         } else {
-            return new SmallMessageSnapshot.CompletedSnapshot(id,
-                    FileDownloadStatus.completed, true, (int) totalBytes);
+            if (flowDirectly) {
+                return new SmallMessageSnapshot.CompletedFlowDirectlySnapshot(id, true,
+                        (int) totalBytes);
+            } else {
+                return new SmallMessageSnapshot.CompletedSnapshot(id, true, (int) totalBytes);
+            }
         }
     }
 
-    public static MessageSnapshot catchWarn(int id, long sofar, long total) {
+    public static MessageSnapshot catchWarn(int id, long sofar, long total, boolean flowDirectly) {
         if (total > Integer.MAX_VALUE) {
-            return new LargeMessageSnapshot.WarnMessageSnapshot(id, FileDownloadStatus.warn,
-                    sofar, total);
+            if (flowDirectly) {
+                return new LargeMessageSnapshot.WarnFlowDirectlySnapshot(id, sofar, total);
+            } else {
+                return new LargeMessageSnapshot.WarnMessageSnapshot(id, sofar, total);
+            }
         } else {
-            return new SmallMessageSnapshot.WarnMessageSnapshot(id, FileDownloadStatus.warn,
-                    (int) sofar, (int) total);
+            if (flowDirectly) {
+                return new SmallMessageSnapshot.WarnFlowDirectlySnapshot(id, (int) sofar, (int) total);
+            } else {
+                return new SmallMessageSnapshot.WarnMessageSnapshot(id, (int) sofar, (int) total);
+            }
         }
     }
 
     public static MessageSnapshot catchException(BaseDownloadTask task) {
         if (task.isLargeFile()) {
             return new LargeMessageSnapshot.ErrorMessageSnapshot(task.getId(),
-                    FileDownloadStatus.error, task.getLargeFileSoFarBytes(), task.getEx());
+                    task.getLargeFileSoFarBytes(), task.getErrorCause());
         } else {
             return new SmallMessageSnapshot.ErrorMessageSnapshot(task.getId(),
-                    FileDownloadStatus.error, task.getSmallFileSoFarBytes(), task.getEx());
+                    task.getSmallFileSoFarBytes(), task.getErrorCause());
         }
     }
 
     public static MessageSnapshot catchPause(BaseDownloadTask task) {
         if (task.isLargeFile()) {
-            return new LargeMessageSnapshot.PausedSnapshot(task.getId(), FileDownloadStatus.paused,
+            return new LargeMessageSnapshot.PausedSnapshot(task.getId(),
                     task.getLargeFileSoFarBytes(), task.getLargeFileTotalBytes());
         } else {
-            return new SmallMessageSnapshot.PausedSnapshot(task.getId(), FileDownloadStatus.paused,
+            return new SmallMessageSnapshot.PausedSnapshot(task.getId(),
                     task.getSmallFileSoFarBytes(), task.getSmallFileTotalBytes());
         }
     }
@@ -84,11 +95,11 @@ public class MessageSnapshotTaker {
                             "already be completed. %d %d", snapshot.getId(), snapshot.getStatus()));
         }
 
-        return new MessageSnapshot(snapshot.getId(), FileDownloadStatus.blockComplete);
+        return new BlockCompleteMessage.BlockCompleteMessageImpl(snapshot);
     }
 
     public static MessageSnapshot take(byte status, FileDownloadModel model,
-                                        FileDownloadRunnable runnable) {
+                                       FileDownloadRunnable runnable) {
         final MessageSnapshot snapShot;
         final int id = model.getId();
         if (status == FileDownloadStatus.warn) {
@@ -99,61 +110,61 @@ public class MessageSnapshotTaker {
         switch (status) {
             case FileDownloadStatus.pending:
                 if (model.isLargeFile()) {
-                    snapShot = new LargeMessageSnapshot.PendingMessageSnapshot(id, status,
+                    snapShot = new LargeMessageSnapshot.PendingMessageSnapshot(id,
                             model.getSoFar(), model.getTotal());
                 } else {
-                    snapShot = new SmallMessageSnapshot.PendingMessageSnapshot(id, status,
+                    snapShot = new SmallMessageSnapshot.PendingMessageSnapshot(id,
                             (int) model.getSoFar(), (int) model.getTotal());
                 }
                 break;
             case FileDownloadStatus.started:
-                snapShot = new MessageSnapshot(id, status);
+                snapShot = new MessageSnapshot.StartedMessageSnapshot(id);
                 break;
             case FileDownloadStatus.connected:
                 final String filename = model.isPathAsDirectory() ? model.getFilename() :
                         null;
                 if (model.isLargeFile()) {
-                    snapShot = new LargeMessageSnapshot.ConnectedMessageSnapshot(id, status,
+                    snapShot = new LargeMessageSnapshot.ConnectedMessageSnapshot(id,
                             runnable.isResuming(), model.getTotal(), model.getETag(), filename);
                 } else {
-                    snapShot = new SmallMessageSnapshot.ConnectedMessageSnapshot(id, status,
+                    snapShot = new SmallMessageSnapshot.ConnectedMessageSnapshot(id,
                             runnable.isResuming(), (int) model.getTotal(), model.getETag(), filename);
                 }
                 break;
             case FileDownloadStatus.progress:
                 if (model.isLargeFile()) {
-                    snapShot = new LargeMessageSnapshot.ProgressMessageSnapshot(id, status,
-                            model.getSoFar());
+                    snapShot = new LargeMessageSnapshot.
+                            ProgressMessageSnapshot(id, model.getSoFar());
                 } else {
-                    snapShot = new SmallMessageSnapshot.ProgressMessageSnapshot(id, status,
-                            (int) model.getSoFar());
+                    snapShot = new SmallMessageSnapshot.
+                            ProgressMessageSnapshot(id, (int) model.getSoFar());
                 }
                 break;
             case FileDownloadStatus.completed:
                 if (model.isLargeFile()) {
-                    snapShot = new LargeMessageSnapshot.CompletedSnapshot(id, status,
-                            false, model.getTotal());
+                    snapShot = new LargeMessageSnapshot.
+                            CompletedSnapshot(id, false, model.getTotal());
                 } else {
-                    snapShot = new SmallMessageSnapshot.CompletedSnapshot(id, status,
-                            false, (int) model.getTotal());
+                    snapShot = new SmallMessageSnapshot.
+                            CompletedSnapshot(id, false, (int) model.getTotal());
                 }
                 break;
             case FileDownloadStatus.retry:
                 if (model.isLargeFile()) {
-                    snapShot = new LargeMessageSnapshot.RetryMessageSnapshot(id, status,
+                    snapShot = new LargeMessageSnapshot.RetryMessageSnapshot(id,
                             model.getSoFar(), runnable.getThrowable(), runnable.getRetryingTimes());
                 } else {
-                    snapShot = new SmallMessageSnapshot.RetryMessageSnapshot(id, status,
+                    snapShot = new SmallMessageSnapshot.RetryMessageSnapshot(id,
                             (int) model.getSoFar(), runnable.getThrowable(),
                             runnable.getRetryingTimes());
                 }
                 break;
             case FileDownloadStatus.error:
                 if (model.isLargeFile()) {
-                    snapShot = new LargeMessageSnapshot.ErrorMessageSnapshot(id, status,
+                    snapShot = new LargeMessageSnapshot.ErrorMessageSnapshot(id,
                             model.getSoFar(), runnable.getThrowable());
                 } else {
-                    snapShot = new SmallMessageSnapshot.ErrorMessageSnapshot(id, status,
+                    snapShot = new SmallMessageSnapshot.ErrorMessageSnapshot(id,
                             (int) model.getSoFar(), runnable.getThrowable());
                 }
                 break;
@@ -173,10 +184,10 @@ public class MessageSnapshotTaker {
                 }
 
                 if (model.isLargeFile()) {
-                    snapShot = new LargeMessageSnapshot.ErrorMessageSnapshot(id, status,
+                    snapShot = new LargeMessageSnapshot.ErrorMessageSnapshot(id,
                             model.getSoFar(), throwable);
                 } else {
-                    snapShot = new SmallMessageSnapshot.ErrorMessageSnapshot(id, status,
+                    snapShot = new SmallMessageSnapshot.ErrorMessageSnapshot(id,
                             (int) model.getSoFar(), throwable);
                 }
                 break;

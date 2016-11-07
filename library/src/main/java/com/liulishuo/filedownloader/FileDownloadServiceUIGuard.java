@@ -32,8 +32,6 @@ import com.liulishuo.filedownloader.util.DownloadServiceNotConnectedHelper;
 
 
 /**
- * Created by Jacksgong on 9/23/15.
- * <p/>
  * The UI-Guard for FileDownloader-Process.
  * <p/>
  * The only Class can access the FileDownload-Process, and the only Class can receive the event from
@@ -92,14 +90,16 @@ class FileDownloadServiceUIGuard extends
     public boolean start(final String url, final String path, final boolean pathAsDirectory,
                          final int callbackProgressTimes,
                          final int callbackProgressMinIntervalMillis,
-                         final int autoRetryTimes, boolean forceReDownload, final FileDownloadHeader header) {
+                         final int autoRetryTimes, final boolean forceReDownload,
+                         final FileDownloadHeader header, final boolean isWifiRequired) {
         if (!isConnected()) {
             return DownloadServiceNotConnectedHelper.start(url, path, pathAsDirectory);
         }
 
         try {
             getService().start(url, path, pathAsDirectory, callbackProgressTimes,
-                    callbackProgressMinIntervalMillis, autoRetryTimes, forceReDownload, header);
+                    callbackProgressMinIntervalMillis, autoRetryTimes, forceReDownload, header,
+                    isWifiRequired);
         } catch (RemoteException e) {
             e.printStackTrace();
 
@@ -260,5 +260,34 @@ class FileDownloadServiceUIGuard extends
         }
 
         return false;
+    }
+
+    @Override
+    public boolean clearTaskData(int id) {
+        if (!isConnected()) {
+            return DownloadServiceNotConnectedHelper.clearTaskData(id);
+        }
+
+        try {
+            return getService().clearTaskData(id);
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+
+        return false;
+    }
+
+    @Override
+    public void clearAllTaskData() {
+        if (!isConnected()) {
+            DownloadServiceNotConnectedHelper.clearAllTaskData();
+            return;
+        }
+
+        try {
+            getService().clearAllTaskData();
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
     }
 }

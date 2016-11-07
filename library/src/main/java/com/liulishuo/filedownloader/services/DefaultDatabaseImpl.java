@@ -33,12 +33,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Created by Jacksgong on 9/24/15.
- * <p/>
- * For storing and updating the {@link FileDownloadModel} to DB.
- * And will maintain the DB automatically, when FileDownloader-Process is launching.
+ * For storing and updating the {@link FileDownloadModel} to the filedownloader database, and also
+ * maintain the database when FileDownloader-Process is launching automatically.
  */
-class FileDownloadDBHelper implements IFileDownloadDBHelper {
+class DefaultDatabaseImpl implements FileDownloadDatabase {
 
     private final SQLiteDatabase db;
 
@@ -46,8 +44,8 @@ class FileDownloadDBHelper implements IFileDownloadDBHelper {
 
     private final SparseArray<FileDownloadModel> downloaderModelMap = new SparseArray<>();
 
-    public FileDownloadDBHelper() {
-        FileDownloadDBOpenHelper openHelper = new FileDownloadDBOpenHelper(FileDownloadHelper.getAppContext());
+    public DefaultDatabaseImpl() {
+        DefaultDatabaseOpenHelper openHelper = new DefaultDatabaseOpenHelper(FileDownloadHelper.getAppContext());
 
         db = openHelper.getWritableDatabase();
 
@@ -94,7 +92,7 @@ class FileDownloadDBHelper implements IFileDownloadDBHelper {
                 // consider check in new thread, but SQLite lock | file lock aways effect, so sync
                 if (model.getStatus() == FileDownloadStatus.paused &&
                         FileDownloadMgr.isBreakpointAvailable(model.getId(), model,
-                                model.getPath())) {
+                                model.getPath(), null)) {
                     // can be reused in the old mechanism(no-temp-file).
 
                     final File tempFile = new File(model.getTempFilePath());
@@ -219,11 +217,19 @@ class FileDownloadDBHelper implements IFileDownloadDBHelper {
     }
 
     @Override
-    public void remove(int id) {
+    public boolean remove(int id) {
         downloaderModelMap.remove(id);
 
         // db
-        db.delete(TABLE_NAME, FileDownloadModel.ID + " = ?", new String[]{String.valueOf(id)});
+        return db.delete(TABLE_NAME, FileDownloadModel.ID + " = ?", new String[]{String.valueOf(id)})
+                != 0;
+    }
+
+    @Override
+    public void clear() {
+        downloaderModelMap.clear();
+
+        db.delete(TABLE_NAME, null, null);
     }
 
     @Override

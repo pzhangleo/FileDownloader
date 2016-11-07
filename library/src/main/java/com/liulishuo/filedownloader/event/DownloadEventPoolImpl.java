@@ -16,27 +16,21 @@
 
 package com.liulishuo.filedownloader.event;
 
+import com.liulishuo.filedownloader.util.FileDownloadExecutors;
 import com.liulishuo.filedownloader.util.FileDownloadLog;
 
 import junit.framework.Assert;
 
 import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executor;
 
 /**
- * Created by Jacksgong on 15/6/23.
- * <p/>
  * Implementing actions for event pool.
  */
 public class DownloadEventPoolImpl implements IDownloadEventPool {
 
-    private final ExecutorService threadPool = new ThreadPoolExecutor(3, 30,
-            10, TimeUnit.SECONDS,
-            new LinkedBlockingQueue<Runnable>());
+    private final Executor threadPool = FileDownloadExecutors.newDefaultThreadPool(10, "EventPool");
 
     private final HashMap<String, LinkedList<IDownloadListener>> listenersMap = new HashMap<>();
 

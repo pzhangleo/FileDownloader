@@ -25,15 +25,20 @@ import com.liulishuo.filedownloader.message.MessageSnapshotFlow;
 import com.liulishuo.filedownloader.message.MessageSnapshotTaker;
 import com.liulishuo.filedownloader.model.FileDownloadModel;
 import com.liulishuo.filedownloader.services.DownloadMgrInitialParams;
+import com.liulishuo.filedownloader.services.FileDownloadDatabase;
+import com.liulishuo.filedownloader.stream.FileDownloadBufferedOutputStream;
+import com.liulishuo.filedownloader.stream.FileDownloadOkio;
+import com.liulishuo.filedownloader.stream.FileDownloadOutputStream;
+import com.liulishuo.filedownloader.stream.FileDownloadRandomAccessFile;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 
 import okhttp3.OkHttpClient;
 
 /**
- * Created by Jacksgong on 12/17/15.
- * <p/>
- * The simple helper for cache the {@code APP_CONTEXT} and {@code OK_HTTP_CLIENT}.
+ * The helper for cache the {@code APP_CONTEXT} and {@code OK_HTTP_CLIENT} for the main process and
+ * the filedownloader process.
  *
  * @see com.liulishuo.filedownloader.FileDownloader#init(Context, OkHttpClientCustomMaker)
  */
@@ -51,20 +56,19 @@ public class FileDownloadHelper {
         return APP_CONTEXT;
     }
 
-    public static void initializeDownloadMgrParams(final OkHttpClientCustomMaker maker,
-                                                   final int maxNetworkThreadCount) {
+    public static void initializeDownloadMgrParams(DownloadMgrInitialParams.InitCustomMaker customMaker) {
         if (!FileDownloadUtils.isDownloaderProcess(FileDownloadHelper.getAppContext())) {
             throw new IllegalStateException(
                     FileDownloadUtils.formatString("the DownloadMgrInitialParams is only " +
                             "can be touched in the process which the download service settles on"));
         }
 
-        DOWNLOAD_MANAGER_INITIAL_PARAMS = new DownloadMgrInitialParams(maker,
-                maxNetworkThreadCount);
+        DOWNLOAD_MANAGER_INITIAL_PARAMS = new DownloadMgrInitialParams(customMaker);
     }
 
     public static DownloadMgrInitialParams getDownloadMgrInitialParams() {
-        return DOWNLOAD_MANAGER_INITIAL_PARAMS;
+        return DOWNLOAD_MANAGER_INITIAL_PARAMS == null ?
+                new DownloadMgrInitialParams(null) : DOWNLOAD_MANAGER_INITIAL_PARAMS;
     }
 
     public interface OkHttpClientCustomMaker {
@@ -80,7 +84,56 @@ public class FileDownloadHelper {
         OkHttpClient customMake();
     }
 
-    public static boolean inspectAndInflowDownloaded(int id, String path, boolean forceReDownload) {
+    public interface DatabaseCustomMaker {
+        /**
+         * The database is used for storing the {@link FileDownloadModel}.
+         * <p/>
+         * The data stored in the database is only used for task resumes from the breakpoint.
+         * <p>
+         * The task of the data stored in the database must be a task that has not finished downloading yet,
+         * and if the task has finished downloading, its data will be
+         * {@link FileDownloadDatabase#remove(int)} from the database, since that data is no longer
+         * available for resumption of its task pass.
+         *
+         * @return Nullable, Customize {@link FileDownloadDatabase} which will be used for storing
+         * downloading model.
+         * @see com.liulishuo.filedownloader.services.DefaultDatabaseImpl
+         */
+        FileDownloadDatabase customMake();
+    }
+
+    public interface OutputStreamCreator {
+        /**
+         * The output stream creator is used for creating {@link FileDownloadOutputStream} which is
+         * used to write the input stream to the file for downloading.
+         * <p>
+         * <strong>Note:</strong> please create a output stream which append the content to the
+         * exist file, which means that bytes would be written to the end of the file rather than
+         * the beginning.
+         *
+         * @param file the file will used for storing the downloading content.
+         * @return The output stream used to write downloading byte array to the {@code file}.
+         * @throws FileNotFoundException if the file exists but is a directory
+         *                               rather than a regular file, does not exist but cannot
+         *                               be created, or cannot be opened for any other reason
+         * @see FileDownloadRandomAccessFile.Creator
+         * @see FileDownloadBufferedOutputStream.Creator
+         * @see FileDownloadOkio.Creator
+         */
+        FileDownloadOutputStream create(File file) throws FileNotFoundException;
+
+        /**
+         * @return {@code true} if the {@link FileDownloadOutputStream} is created through
+         * {@link #create(File)} support {@link FileDownloadOutputStream#seek(long)} function.
+         * If the {@link FileDownloadOutputStream} is created through {@link #create(File)} doesn't
+         * support {@link FileDownloadOutputStream#seek(long)}, please return {@code false}, in
+         * order to let the internal mechanism can predict this situation, and handle it smoothly.
+         */
+        boolean supportSeek();
+    }
+
+    public static boolean inspectAndInflowDownloaded(int id, String path, boolean forceReDownload,
+                                                     boolean flowDirectly) {
         if (forceReDownload) {
             return false;
         }
@@ -89,7 +142,7 @@ public class FileDownloadHelper {
             final File file = new File(path);
             if (file.exists()) {
                 MessageSnapshotFlow.getImpl().inflow(MessageSnapshotTaker.
-                        catchCanReusedOldFile(id, file));
+                        catchCanReusedOldFile(id, file, flowDirectly));
                 return true;
             }
         }
@@ -98,10 +151,12 @@ public class FileDownloadHelper {
     }
 
     public static boolean inspectAndInflowDownloading(int id, FileDownloadModel model,
-                                                      IThreadPoolMonitor monitor) {
+                                                      IThreadPoolMonitor monitor,
+                                                      boolean flowDirectly) {
         if (monitor.isDownloading(model)) {
             MessageSnapshotFlow.getImpl().
-                    inflow(MessageSnapshotTaker.catchWarn(id, model.getSoFar(), model.getTotal()));
+                    inflow(MessageSnapshotTaker.catchWarn(id, model.getSoFar(), model.getTotal(),
+                            flowDirectly));
             return true;
         }
 

@@ -24,28 +24,20 @@ import com.liulishuo.filedownloader.model.FileDownloadModel;
 
 
 /**
- * Created by Jacksgong on 9/25/15.
- * <p/>
- * The DB For storing the {@link FileDownloadModel}.
- * <p/>
- * Use to judge whether can resume from breakpoint; or whether the downloaded file matches the
- * target task.
- *
- * @see FileDownloadDBHelper
- * @see FileDownloadMgr#isBreakpointAvailable(int, FileDownloadModel)
+ * The default opener of the filedownloader database helper.
  */
-class FileDownloadDBOpenHelper extends SQLiteOpenHelper {
+class DefaultDatabaseOpenHelper extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "filedownloader.db";
     private static final int DATABASE_VERSION = 2;
 
-    public FileDownloadDBOpenHelper(final Context context) {
+    public DefaultDatabaseOpenHelper(final Context context) {
         super(context, DATABASE_NAME, null, DATABASE_VERSION);
     }
 
     @Override
     public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS " +
-                FileDownloadDBHelper.TABLE_NAME + "( " +
+                DefaultDatabaseImpl.TABLE_NAME + "( " +
                 FileDownloadModel.ID + " INTEGER PRIMARY KEY, " + // id
                 FileDownloadModel.URL + " VARCHAR, " + // url
                 FileDownloadModel.PATH + " VARCHAR, " + // path
@@ -63,12 +55,12 @@ class FileDownloadDBOpenHelper extends SQLiteOpenHelper {
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         if (oldVersion == 1 && newVersion == 2) {
-            String addAsDirectoryColumn = "ALTER TABLE " + FileDownloadDBHelper.TABLE_NAME +
+            String addAsDirectoryColumn = "ALTER TABLE " + DefaultDatabaseImpl.TABLE_NAME +
                     " ADD COLUMN " + FileDownloadModel.PATH_AS_DIRECTORY +
                     " TINYINT(1) DEFAULT 0";
             db.execSQL(addAsDirectoryColumn);
 
-            String addFilenameColumn = "ALTER TABLE " + FileDownloadDBHelper.TABLE_NAME +
+            String addFilenameColumn = "ALTER TABLE " + DefaultDatabaseImpl.TABLE_NAME +
                     " ADD COLUMN " + FileDownloadModel.FILENAME +
                     " VARCHAR";
             db.execSQL(addFilenameColumn);

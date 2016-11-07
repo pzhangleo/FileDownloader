@@ -19,31 +19,24 @@ package com.liulishuo.filedownloader;
 import android.app.Application;
 import android.app.Notification;
 import android.app.NotificationManager;
+import android.content.ComponentName;
 import android.content.Context;
-import android.os.Handler;
-import android.os.HandlerThread;
-import android.os.Message;
+import android.content.ServiceConnection;
+import android.os.IBinder;
 
 import com.liulishuo.filedownloader.event.DownloadServiceConnectChangedEvent;
 import com.liulishuo.filedownloader.model.FileDownloadStatus;
 import com.liulishuo.filedownloader.model.FileDownloadTaskAtom;
+import com.liulishuo.filedownloader.services.DownloadMgrInitialParams;
 import com.liulishuo.filedownloader.util.FileDownloadHelper;
 import com.liulishuo.filedownloader.util.FileDownloadLog;
 import com.liulishuo.filedownloader.util.FileDownloadProperties;
 import com.liulishuo.filedownloader.util.FileDownloadUtils;
 
-import junit.framework.Assert;
-
 import java.io.File;
-import java.lang.ref.WeakReference;
-import java.util.HashMap;
 import java.util.List;
 
-import okhttp3.OkHttpClient;
-
 /**
- * Created by Jacksgong on 12/17/15.
- * <p/>
  * The basic entrance for FileDownloader.
  *
  * @see com.liulishuo.filedownloader.services.FileDownloadService The service for FileDownloader.
@@ -53,16 +46,28 @@ import okhttp3.OkHttpClient;
 public class FileDownloader {
 
     /**
-     * Just cache Application's Context
+     * Initialize the FileDownloader.
+     * <p>
+     * <strong>Note:</strong> this method consumes 4~28ms in nexus 5. the most cost used for
+     * loading classes.
      *
      * @see #init(Context, FileDownloadHelper.OkHttpClientCustomMaker, int)
      */
     public static void init(final Context context) {
-        init(context, null);
+        init(context, null, 0);
     }
 
 
     /**
+     * Initialize the FileDownloader.
+     * <p>
+     * <strong>Note:</strong> this method consumes 4~28ms in nexus 5. the most cost used for
+     * loading classes.
+     *
+     * @param context                 The application context.
+     * @param okHttpClientCustomMaker The okHttpClient customize maker, the okHttpClient will be used
+     *                                in the downloader service to downloading file. You can provide
+     *                                {@code null} for this value.
      * @see #init(Context, FileDownloadHelper.OkHttpClientCustomMaker, int)
      */
     public static void init(final Context context,
@@ -72,17 +77,16 @@ public class FileDownloader {
     }
 
     /**
-     * Cache {@code context} in Main-Process and FileDownloader-Process; And will init the
-     * OkHttpClient in FileDownloader-Process, if the {@code okHttpClientCustomMaker} is provided.
-     * <p/>
-     * Must be invoked at{@link Application#onCreate()} in the Main process and the filedownloader
-     * process.
+     * Initialize the FileDownloader.
+     * <p>
+     * <strong>Note:</strong> this method consumes 4~28ms in nexus 5. the most cost used for
+     * loading classes.
      *
-     * @param context                 This context will be hold in FileDownloader, so recommend
-     *                                use {@link Application#getApplicationContext()}.
-     * @param okHttpClientCustomMaker Nullable, For Customize {@link OkHttpClient},
-     *                                Only be used on the ':filedownloader' progress.
-     * @param maxNetworkThreadCount   The max network thread count, what is the number of
+     * @param context                 The context.
+     * @param okHttpClientCustomMaker The okHttpClient customize maker, the okHttpClient will be used
+     *                                in the downloader service to downloading file. You can provide
+     *                                {@code null} for this value.
+     * @param maxNetworkThreadCount   The maximum count of the network thread, what is the number of
      *                                simultaneous downloads in FileDownloader.
      *                                If this value is 0, the value will be ignored and use
      *                                {@link FileDownloadProperties#DOWNLOAD_MAX_NETWORK_THREAD_COUNT}
@@ -94,14 +98,39 @@ public class FileDownloader {
     public static void init(final Context context,
                             /** Nullable **/final FileDownloadHelper.OkHttpClientCustomMaker okHttpClientCustomMaker,
                             /** [1,12] **/final int maxNetworkThreadCount) {
+        init(context, new DownloadMgrInitialParams.InitCustomMaker().
+                okHttpClient(okHttpClientCustomMaker).maxNetworkThreadCount(maxNetworkThreadCount));
+    }
+
+    /**
+     * * Initialize the FileDownloader.
+     * <p>
+     * <strong>Note:</strong> this method consumes 4~28ms in nexus 5. the most cost used for
+     * loading classes.
+     * <p>
+     * This method cache {@code context} in Main-Process and FileDownloader-Process, and if the
+     * {@code okHttpClientCustomMaker} is provided, FileDownloader will initialize the okHttpClient
+     * in the FileDownloadService settled downed process.
+     * <p/>
+     * <strong>Tips:</strong> As default, you need invoke this method in {@link Application#onCreate()}
+     * to make sure the {@code context} can be hold in both Main-Process and FileDownloader-Process.
+     * But if you set the downloader service running in the main process, you can invoke this method
+     * when you need use FileDownloader. Ref {@link FileDownloadProperties} to set the downloader
+     * service running in the main process.
+     *
+     * @param context The context.
+     * @param maker   Used to customize the download service.
+     */
+    public static void init(final Context context,
+                            final DownloadMgrInitialParams.InitCustomMaker maker) {
         if (FileDownloadLog.NEED_LOG) {
             FileDownloadLog.d(FileDownloader.class, "init Downloader");
         }
+
         FileDownloadHelper.holdContext(context);
 
         if (FileDownloadUtils.isDownloaderProcess(context)) {
-            FileDownloadHelper.initializeDownloadMgrParams(okHttpClientCustomMaker,
-                    maxNetworkThreadCount);
+            FileDownloadHelper.initializeDownloadMgrParams(maker);
 
             try {
                 FileDownloadUtils.setMinProgressStep(FileDownloadProperties.getImpl().DOWNLOAD_MIN_PROGRESS_STEP);
@@ -110,7 +139,6 @@ public class FileDownloader {
                 e.printStackTrace();
             }
         }
-
     }
 
     /**
@@ -138,22 +166,19 @@ public class FileDownloader {
     }
 
     /**
-     * For Avoid Missing Screen Frames.
-     * 避免掉帧
+     * For avoiding missing screen frames.
      * <p/>
-     * Every {@link FileDownloadMessageStation#INTERVAL} milliseconds post 1 message to the ui thread at most,
-     * and will handle up to {@link FileDownloadMessageStation#SUB_PACKAGE_SIZE} events(callbacks) on the ui thread.
+     * This mechanism is used for avoid methods in {@link FileDownloadListener} is invoked too frequent
+     * in result the system missing screen frames in the main thread.
+     * <p>
+     * We wrap the message package which size is {@link FileDownloadMessageStation#SUB_PACKAGE_SIZE},
+     * and post the package to the main thread with the interval:
+     * {@link FileDownloadMessageStation#INTERVAL} milliseconds.
      * <p/>
-     * 每{@link FileDownloadMessageStation#INTERVAL}毫秒抛最多1个Message到ui线程，并且每次抛到ui线程后，
-     * 在ui线程最多处理处理{@link FileDownloadMessageStation#SUB_PACKAGE_SIZE} 个回调。
-     * <p/>
-     * 默认值是10ms，当该值小于0时，每个回调都会立刻抛回ui线程，可能会对UI的Looper照成较大压力，也可能引发掉帧。
+     * The default interval is 10ms, if {@code intervalMillisecond} equal to or less than 0, each
+     * callback in {@link FileDownloadListener} will be posted to the main thread immediately.
      *
-     * @param intervalMillisecond interval for ui {@link Handler#post(Runnable)}
-     *                            default is {@link FileDownloadMessageStation#DEFAULT_INTERVAL}
-     *                            if the value is less than 0, each callback will always
-     *                            {@link Handler#post(Runnable)} to ui thread immediately, may will
-     *                            cause drop frames, may will produce great pressure on the UI Thread Looper
+     * @param intervalMillisecond The time interval between posting two message packages.
      * @see #enableAvoidDropFrame()
      * @see #disableAvoidDropFrame()
      * @see #setGlobalHandleSubPackageSize(int)
@@ -163,17 +188,18 @@ public class FileDownloader {
     }
 
     /**
-     * For Avoid Missing Screen Frames.
-     * 避免掉帧
+     * For avoiding missing screen frames.
      * <p/>
-     * Every {@link FileDownloadMessageStation#INTERVAL} milliseconds post 1 message to the ui thread at most,
-     * and will handle up to {@link FileDownloadMessageStation#SUB_PACKAGE_SIZE} events(callbacks) on the ui thread.
-     * <p/>
-     * 每{@link FileDownloadMessageStation#INTERVAL}毫秒抛最多1个Message到ui线程，并且每次抛到ui线程后，
-     * 在ui线程最多处理处理{@link FileDownloadMessageStation#SUB_PACKAGE_SIZE} 个回调。
+     * This mechanism is used for avoid methods in {@link FileDownloadListener} is invoked too frequent
+     * in result the system missing screen frames in the main thread.
+     * <p>
+     * We wrap the message package which size is {@link FileDownloadMessageStation#SUB_PACKAGE_SIZE},
+     * and post the package to the main thread with the interval:
+     * {@link FileDownloadMessageStation#INTERVAL} milliseconds.
+     * <p>
+     * The default count of message for a message package is 5.
      *
-     * @param packageSize per sub-package size for handle event on 1 ui {@link Handler#post(Runnable)}
-     *                    default is {@link FileDownloadMessageStation#DEFAULT_SUB_PACKAGE_SIZE}
+     * @param packageSize The count of message for a message package.
      * @see #setGlobalPost2UIInterval(int)
      */
     public static void setGlobalHandleSubPackageSize(final int packageSize) {
@@ -184,8 +210,8 @@ public class FileDownloader {
     }
 
     /**
-     * Avoid missing screen frames, but this leads to all callbacks in {@link FileDownloadListener}
-     * do not  be invoked at once when it has already achieved.
+     * Avoid missing screen frames, this leads to all callbacks in {@link FileDownloadListener} do
+     * not be invoked at once when it has already achieved to ensure callbacks don't be too frequent.
      *
      * @see #isEnabledAvoidDropFrame()
      * @see #setGlobalPost2UIInterval(int)
@@ -195,8 +221,8 @@ public class FileDownloader {
     }
 
     /**
-     * Disable avoid missing screen frames, let all callbacks in {@link FileDownloadListener} will be invoked
-     * at once when it achieve.
+     * Disable avoiding missing screen frames, let all callbacks in {@link FileDownloadListener}
+     * can be invoked at once when it achieve.
      *
      * @see #isEnabledAvoidDropFrame()
      * @see #setGlobalPost2UIInterval(int)
@@ -206,7 +232,7 @@ public class FileDownloader {
     }
 
     /**
-     * @return has already enabled Avoid Missing Screen Frames
+     * @return {@code true} if enabled the function of avoiding missing screen frames.
      * @see #enableAvoidDropFrame()
      * @see #disableAvoidDropFrame()
      * @see #setGlobalPost2UIInterval(int)
@@ -216,84 +242,63 @@ public class FileDownloader {
     }
 
     /**
-     * Create a download task
+     * Create a download task.
      */
     public BaseDownloadTask create(final String url) {
-        return new FileDownloadTask(url);
+        return new DownloadTask(url);
     }
 
     /**
-     * Start the download queue by the same listener
+     * Start the download queue by the same listener.
      *
-     * @param listener start download by same listener
-     * @param isSerial is execute them linearly
+     * @param listener Used to assemble tasks which is bound by the same {@code listener}
+     * @param isSerial Whether start tasks one by one rather than parallel.
+     * @return {@code true} if start tasks successfully.
      */
-    public void start(final FileDownloadListener listener, final boolean isSerial) {
+    public boolean start(final FileDownloadListener listener, final boolean isSerial) {
 
         if (listener == null) {
-            //TODO PROVIDING LOG.
-            return;
+            FileDownloadLog.w(this, "Tasks with the listener can't start, because the listener " +
+                    "provided is null: [null, %B]", isSerial);
+            return false;
         }
 
-        final List<BaseDownloadTask> list = FileDownloadList.getImpl().copy(listener);
 
-        if (FileDownloadMonitor.isValid()) {
-            FileDownloadMonitor.getMonitor().onRequestStart(list.size(), isSerial, listener);
-        }
-
-        if (FileDownloadLog.NEED_LOG) {
-            FileDownloadLog.v(this, "start list size[%d] listener[%s] isSerial[%B]", list.size(), listener, isSerial);
-        }
-
-        if (isSerial) {
-            // serial
-            final Handler serialHandler = createSerialHandler(list);
-            Message msg = serialHandler.obtainMessage();
-            msg.what = WHAT_SERIAL_NEXT;
-            msg.arg1 = 0;
-            serialHandler.sendMessage(msg);
-            synchronized (RUNNING_SERIAL_MAP) {
-                RUNNING_SERIAL_MAP.put(listener, serialHandler);
-            }
-        } else {
-            // parallel
-            for (final BaseDownloadTask downloadTask : list) {
-                downloadTask.start();
-            }
-        }
+        return isSerial ?
+                getQueuesHandler().startQueueSerial(listener) :
+                getQueuesHandler().startQueueParallel(listener);
     }
 
 
     /**
-     * Pause the download queue by the same listener
+     * Pause the download queue by the same {@code listener}.
      *
-     * @param listener paused download by same listener
+     * @param listener the listener.
      * @see #pause(int)
      */
     public void pause(final FileDownloadListener listener) {
         FileDownloadTaskLauncher.getImpl().expire(listener);
-        final List<BaseDownloadTask> downloadList = FileDownloadList.getImpl().copy(listener);
+        final List<BaseDownloadTask.IRunningTask> taskList =
+                FileDownloadList.getImpl().copy(listener);
         synchronized (pauseLock) {
-            for (BaseDownloadTask baseDownloadTask : downloadList) {
-                baseDownloadTask.pause();
+            for (BaseDownloadTask.IRunningTask task : taskList) {
+                task.getOrigin().pause();
             }
         }
-
-
     }
 
     private Runnable pauseAllRunnable;
     private final static Object pauseLock = new Object();
 
     /**
-     * Pause all tasks
+     * Pause all tasks running in FileDownloader.
      */
     public void pauseAll() {
         FileDownloadTaskLauncher.getImpl().expireAll();
-        final BaseDownloadTask[] downloadList = FileDownloadList.getImpl().copy();
+        final BaseDownloadTask.IRunningTask[] downloadList = FileDownloadList.getImpl().copy();
         synchronized (pauseLock) {
-            for (BaseDownloadTask baseDownloadTask : downloadList) {
-                baseDownloadTask.pause();
+            for (BaseDownloadTask.IRunningTask task : downloadList) {
+                task.getOrigin().pause();
             }
         }
         // double check, for case: File Download progress alive but ui progress has died and relived,
@@ -315,42 +320,104 @@ public class FileDownloader {
     }
 
     /**
-     * Pause the download task by the downloadId
+     * Pause downloading tasks with the {@code id}.
      *
-     * @param downloadId pause download by download id
+     * @param id the {@code id} .
+     * @return The size of tasks has been paused.
      * @see #pause(FileDownloadListener)
      */
-    public void pause(final int downloadId) {
-        BaseDownloadTask downloadTask = FileDownloadList.getImpl().get(downloadId);
-        if (downloadTask == null) {
-            FileDownloadLog.w(this, "request pause but not exist %d", downloadId);
-            return;
+    public int pause(final int id) {
+        List<BaseDownloadTask.IRunningTask> taskList = FileDownloadList.getImpl().getDownloadingList(id);
+        if (null == taskList || taskList.isEmpty()) {
+            FileDownloadLog.w(this, "request pause but not exist %d", id);
+            return 0;
         }
-        downloadTask.pause();
+
+        for (BaseDownloadTask.IRunningTask task : taskList) {
+            task.getOrigin().pause();
+        }
+
+        return taskList.size();
     }
 
     /**
-     * Get downloaded so far bytes by the downloadId
+     * Clear the data with the provided {@code id}.
+     * Normally used to deleting the data in filedownloader database, when it is paused or in
+     * downloading status. If you want to re-download it clearly.
+     * <p/>
+     * <strong>Note:</strong> YOU NO NEED to clear the data when it is already completed downloading,
+     * because the data would be deleted when it completed downloading automatically by FileDownloader.
+     * <p>
+     * If there are tasks with the {@code id} in downloading, will be paused first;
+     * If delete the data with the {@code id} in the filedownloader database successfully, will try
+     * to delete its intermediate downloading file and downloaded file.
+     *
+     * @param id             the download {@code id}.
+     * @param targetFilePath the target path.
+     * @return {@code true} if the data with the {@code id} in filedownloader database was deleted,
+     * and tasks with the {@code id} was paused; {@code false} otherwise.
+     */
+    public boolean clear(final int id, final String targetFilePath) {
+        pause(id);
+
+        if (FileDownloadServiceProxy.getImpl().clearTaskData(id)) {
+            // delete the task data in the filedownloader database successfully or no data with the
+            // id in filedownloader database.
+            final File intermediateFile = new File(FileDownloadUtils.getTempPath(targetFilePath));
+            if (intermediateFile.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                intermediateFile.delete();
+            }
+
+            final File targetFile = new File(targetFilePath);
+            if (targetFile.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                targetFile.delete();
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Clear all data in the filedownloader database.
+     * <p>
+     * <strong>Note:</strong> Normally, YOU NO NEED to clearAllTaskData manually, because the
+     * FileDownloader will maintain those data to ensure only if the data available for resuming
+     * can be kept automatically.
+     *
+     * @see #clear(int, String)
+     */
+    public void clearAllTaskData() {
+        pauseAll();
+
+        FileDownloadServiceProxy.getImpl().clearAllTaskData();
+    }
+
+    /**
+     * Get downloaded bytes so far by the downloadId.
      */
     public long getSoFar(final int downloadId) {
-        BaseDownloadTask downloadTask = FileDownloadList.getImpl().get(downloadId);
-        if (downloadTask == null) {
+        BaseDownloadTask.IRunningTask task = FileDownloadList.getImpl().get(downloadId);
+        if (task == null) {
             return FileDownloadServiceProxy.getImpl().getSofar(downloadId);
         }
 
-        return downloadTask.getLargeFileSoFarBytes();
+        return task.getOrigin().getLargeFileSoFarBytes();
     }
 
     /**
-     * Get file total bytes by the downloadId
+     * Get the total bytes of the target file for the task with the {code id}.
      */
-    public long getTotal(final int downloadId) {
-        BaseDownloadTask downloadTask = FileDownloadList.getImpl().get(downloadId);
-        if (downloadTask == null) {
-            return FileDownloadServiceProxy.getImpl().getTotal(downloadId);
+    public long getTotal(final int id) {
+        BaseDownloadTask.IRunningTask task = FileDownloadList.getImpl().get(id);
+        if (task == null) {
+            return FileDownloadServiceProxy.getImpl().getTotal(id);
         }
 
-        return downloadTask.getLargeFileTotalBytes();
+        return task.getOrigin().getLargeFileTotalBytes();
     }
 
     /**
@@ -376,20 +443,20 @@ public class FileDownloader {
     }
 
     /**
-     * @param downloadId The downloadId.
-     * @param path       Use to judge whether has already completed downloading.
+     * @param id   The downloadId.
+     * @param path The target file path.
      * @return the downloading status.
      * @see FileDownloadStatus
      * @see #getStatus(String, String)
      * @see #getStatusIgnoreCompleted(int)
      */
-    public byte getStatus(final int downloadId, final String path) {
+    public byte getStatus(final int id, final String path) {
         byte status;
-        BaseDownloadTask downloadTask = FileDownloadList.getImpl().get(downloadId);
-        if (downloadTask == null) {
-            status = FileDownloadServiceProxy.getImpl().getStatus(downloadId);
+        BaseDownloadTask.IRunningTask task = FileDownloadList.getImpl().get(id);
+        if (task == null) {
+            status = FileDownloadServiceProxy.getImpl().getStatus(id);
         } else {
-            status = downloadTask.getStatus();
+            status = task.getOrigin().getStatus();
         }
 
         if (path != null && status == FileDownloadStatus.INVALID_STATUS) {
@@ -435,17 +502,24 @@ public class FileDownloader {
      * @see #replaceListener(String, String, FileDownloadListener)
      */
     public int replaceListener(int id, FileDownloadListener listener) {
-        final BaseDownloadTask task = FileDownloadList.getImpl().get(id);
+        final BaseDownloadTask.IRunningTask task = FileDownloadList.getImpl().get(id);
         if (task == null) {
             return 0;
         }
 
-        task.setListener(listener);
-        return task.getId();
+        task.getOrigin().setListener(listener);
+        return task.getOrigin().getId();
     }
 
     /**
-     * Bind & start ':filedownloader' process manually(Do not need, will bind & start automatically by Download Engine if real need)
+     * Start and bind the FileDownloader service.
+     * <p>
+     * <strong>Tips:</strong> The FileDownloader service will start and bind automatically when any task
+     * is request to start.
+     *
+     * @see #bindService(Runnable)
+     * @see #isServiceConnected()
+     * @see #addServiceConnectListener(FileDownloadConnectListener)
      */
     public void bindService() {
         if (!isServiceConnected()) {
@@ -454,7 +528,29 @@ public class FileDownloader {
     }
 
     /**
-     * Unbind & stop ':filedownloader' process manually(Do not need, will unbind & stop automatically by System if leave unused period)
+     * Start and bind the FileDownloader service and run {@code runnable} as soon as the binding is
+     * successful.
+     * <p>
+     * <strong>Tips:</strong> The FileDownloader service will start and bind automatically when any task
+     * is request to start.
+     *
+     * @param runnable the command will be executed as soon as the FileDownloader Service is
+     *                 successfully bound.
+     * @see #isServiceConnected()
+     * @see #bindService()
+     * @see #addServiceConnectListener(FileDownloadConnectListener)
+     */
+    public void bindService(final Runnable runnable) {
+        if (isServiceConnected()) {
+            runnable.run();
+        } else {
+            FileDownloadServiceProxy.getImpl().
+                    bindStartByContext(FileDownloadHelper.getAppContext(), runnable);
+        }
+    }
+
+    /**
+     * Unbind and stop the downloader service.
      */
     public void unBindService() {
         if (isServiceConnected()) {
@@ -462,6 +558,12 @@ public class FileDownloader {
         }
     }
 
+    /**
+     * Unbind and stop the downloader service when there is no task running in the FileDownloader.
+     *
+     * @return {@code true} if unbind and stop the downloader service successfully, {@code false}
+     * there are some tasks running in the FileDownloader.
+     */
     public boolean unBindServiceIfIdle() {
         // check idle
         if (!isServiceConnected()) {
@@ -478,14 +580,17 @@ public class FileDownloader {
     }
 
     /**
-     * @return has connected File Download service
+     * @return {@code true} if the downloader service has been started and connected.
      */
     public boolean isServiceConnected() {
         return FileDownloadServiceProxy.getImpl().isConnected();
     }
 
     /**
-     * @param listener add listener for listening File Download connect/disconnect moment
+     * Add the listener for listening when the status of connection with the downloader service is
+     * changed.
+     *
+     * @param listener The downloader service connection listener.
      * @see #removeServiceConnectListener(FileDownloadConnectListener)
      */
     public void addServiceConnectListener(final FileDownloadConnectListener listener) {
@@ -494,8 +599,10 @@ public class FileDownloader {
     }
 
     /**
-     * @param listener remove listener which has been
-     *                 added by {@link #addServiceConnectListener(FileDownloadConnectListener)}
+     * Remove the listener for listening when the status of connection with the downloader service is
+     * changed.
+     *
+     * @param listener The downloader service connection listener.
      * @see #addServiceConnectListener(FileDownloadConnectListener)
      */
     public void removeServiceConnectListener(final FileDownloadConnectListener listener) {
@@ -504,6 +611,9 @@ public class FileDownloader {
     }
 
     /**
+     * Start the {@code notification} with the {@code id}. This will let the downloader service
+     * change to a foreground service.
+     * <p>
      * In foreground status, will save the FileDownloader alive, even user kill the application from
      * recent apps.
      * <p/>
@@ -519,7 +629,7 @@ public class FileDownloader {
      * @param id           The identifier for this notification as per
      *                     {@link NotificationManager#notify(int, Notification)
      *                     NotificationManager.notify(int, Notification)}; must not be 0.
-     * @param notification The Notification to be displayed.
+     * @param notification The notification to be displayed.
      * @see #stopForeground(boolean)
      */
     public void startForeground(int id, Notification notification) {
@@ -527,12 +637,12 @@ public class FileDownloader {
     }
 
     /**
-     * Remove FileDownload service from foreground state, allowing it to be killed if
+     * Remove the downloader service from the foreground state, allowing it to be killed if
      * more memory is needed.
      *
-     * @param removeNotification If true, the notification previously provided
-     *                           to {@link #startForeground} will be removed.  Otherwise it will remain
-     *                           until a later call removes it (or the service is destroyed).
+     * @param removeNotification {@code true} if the notification previously provided
+     *                           to {@link #startForeground} will be removed. {@code false} it will
+     *                           be remained until a later call removes it (or the service is destroyed).
      * @see #startForeground(int, Notification)
      */
     public void stopForeground(boolean removeNotification) {
@@ -562,8 +672,8 @@ public class FileDownloader {
      * Engine will ignore the exist file and redownload it, because FileDownloader Engine don't know
      * the exist file whether it is valid.
      * @see #setTaskCompleted(List)
-     * @deprecated If you invoked this method, please remove it directly feel free, it doesn't need
-     * any longer. In new mechanism(filedownloader 0.3.3 or higher), FileDownloader doesn't store
+     * @deprecated If you invoked this method, please remove the code directly feel free, it doesn't
+     * need any longer. In new mechanism(filedownloader 0.3.3 or higher), FileDownloader doesn't store
      * completed tasks in Database anymore, because all downloading files have temp a file name.
      */
     @SuppressWarnings("UnusedParameters")
@@ -587,8 +697,8 @@ public class FileDownloader {
      * FileDownloadMgr#obtainCompletedTaskShelfModel(String, String, long)
      * will receive false, and non of them would be updated to DB.
      * @see #setTaskCompleted(String, String, long)
-     * @deprecated If you invoked this method, please remove it directly feel free, it doesn't need
-     * any longer. In new mechanism(filedownloader 0.3.3 or higher), FileDownloader doesn't store
+     * @deprecated If you invoked this method, please remove the code directly feel free, it doesn't
+     * need any longer. In new mechanism(filedownloader 0.3.3 or higher), FileDownloader doesn't store
      * completed tasks in Database anymore, because all downloading files have temp a file name.
      */
     @SuppressWarnings("UnusedParameters")
@@ -599,7 +709,7 @@ public class FileDownloader {
     }
 
     /**
-     * Set the max network thread count, what is the number of simultaneous downloads in
+     * Set the maximum count of the network thread, what is the number of simultaneous downloads in
      * FileDownloader.
      *
      * @param count the number of simultaneous downloads, scope: [1, 12].
@@ -620,153 +730,74 @@ public class FileDownloader {
         return FileDownloadServiceProxy.getImpl().setMaxNetworkThreadCount(count);
     }
 
-    private static Handler createSerialHandler(final List<BaseDownloadTask> serialTasks) {
-        Assert.assertTrue("create serial handler list must not empty", serialTasks != null && serialTasks.size() > 0);
-
-
-        final HandlerThread serialThread = new HandlerThread(
-                FileDownloadUtils.formatString("filedownloader serial thread %s",
-                        serialTasks.get(0).getListener()));
-        serialThread.start();
-
-        final SerialHandlerCallback callback = new SerialHandlerCallback();
-        final Handler serialHandler = new Handler(serialThread.getLooper(), callback);
-        callback.setHandler(serialHandler);
-        callback.setList(serialTasks);
-
-        return serialHandler;
+    /**
+     * If the FileDownloader service is not started and connected, FileDownloader will try to start
+     * it and try to bind with it. The current thread will also be blocked until the FileDownloader
+     * service is started and a connection is established, and then the request you
+     * invoke in {@link FileDownloadLine} will be executed.
+     * <p>
+     * If the FileDownloader service has been started and connected, the request you invoke in
+     * {@link FileDownloadLine} will be executed immediately.
+     * <p>
+     * <strong>Note:</strong> FileDownloader can not block the main thread, because the system is
+     * also call-backs the {@link ServiceConnection#onServiceConnected(ComponentName, IBinder)}
+     * method in the main thread.
+     * <p>
+     * <strong>Tips:</strong> The FileDownloader service will start and bind automatically when any
+     * task is request to start.
+     *
+     * @see FileDownloadLine
+     * @see #bindService(Runnable)
+     */
+    public FileDownloadLine insureServiceBind() {
+        return new FileDownloadLine();
     }
 
+    /**
+     * If the FileDownloader service is not started and connected will return {@code false} immediately,
+     * and meanwhile FileDownloader will try to start FileDownloader service and try to bind with it,
+     * and after it is bound successfully the request you invoke in {@link FileDownloadLineAsync}
+     * will be executed automatically.
+     * <p>
+     * If the FileDownloader service has been started and connected, the request you invoke in
+     * {@link FileDownloadLineAsync} will be executed immediately.
+     *
+     * @see FileDownloadLineAsync
+     * @see #bindService(Runnable)
+     */
+    public FileDownloadLineAsync insureServiceBindAsync() {
+        return new FileDownloadLineAsync();
+    }
 
-    final static HashMap<FileDownloadListener, Handler> RUNNING_SERIAL_MAP = new HashMap<>();
+    private final static Object INIT_QUEUES_HANDLER_LOCK = new Object();
+    private IQueuesHandler mQueuesHandler;
 
-    final static int WHAT_SERIAL_NEXT = 1;
-    final static int WHAT_FREEZE = 2;
-    final static int WHAT_UNFREEZE = 3;
-
-    private static class SerialHandlerCallback implements Handler.Callback {
-        private Handler handler;
-        private List<BaseDownloadTask> list;
-        private int runningIndex = 0;
-        private SerialFinishListener serialFinishListener;
-
-        SerialHandlerCallback() {
-            serialFinishListener =
-                    new SerialFinishListener(new WeakReference<>(this));
-        }
-
-        public void setHandler(final Handler handler) {
-            this.handler = handler;
-        }
-
-        public void setList(List<BaseDownloadTask> list) {
-            this.list = list;
-        }
-
-        @Override
-        public boolean handleMessage(final Message msg) {
-            if (msg.what == WHAT_SERIAL_NEXT) {
-                if (msg.arg1 >= list.size()) {
-                    synchronized (RUNNING_SERIAL_MAP) {
-                        RUNNING_SERIAL_MAP.remove(list.get(0).getListener());
-                    }
-                    // final serial tasks
-                    if (this.handler != null && this.handler.getLooper() != null) {
-                        this.handler.getLooper().quit();
-                        this.handler = null;
-                        this.list = null;
-                        this.serialFinishListener = null;
-                    }
-
-                    if (FileDownloadLog.NEED_LOG) {
-                        FileDownloadLog.d(SerialHandlerCallback.class, "final serial %s %d",
-                                this.list == null ? null : this.list.get(0) == null ? null : this.list.get(0).getListener(),
-                                msg.arg1);
-                    }
-                    return true;
+    IQueuesHandler getQueuesHandler() {
+        if (mQueuesHandler == null) {
+            synchronized (INIT_QUEUES_HANDLER_LOCK) {
+                if (mQueuesHandler == null) {
+                    mQueuesHandler = new QueuesHandler(pauseLock);
                 }
+            }
+        }
+        return mQueuesHandler;
+    }
 
-                runningIndex = msg.arg1;
-                final BaseDownloadTask stackTopTask = this.list.get(runningIndex);
-                synchronized (pauseLock) {
-                    if (!FileDownloadList.getImpl().contains(stackTopTask)) {
-                        // pause?
-                        if (FileDownloadLog.NEED_LOG) {
-                            FileDownloadLog.d(SerialHandlerCallback.class, "direct go next by not contains %s %d", stackTopTask, msg.arg1);
-                        }
-                        goNext(msg.arg1 + 1);
-                        return true;
-                    }
+    private final static Object INIT_LOST_CONNECTED_HANDLER_LOCK = new Object();
+    private ILostServiceConnectedHandler mLostConnectedHandler;
+
+    ILostServiceConnectedHandler getLostConnectedHandler() {
+        if (mLostConnectedHandler == null) {
+            synchronized (INIT_LOST_CONNECTED_HANDLER_LOCK) {
+                if (mLostConnectedHandler == null) {
+                    mLostConnectedHandler = new LostServiceConnectedHandler();
+                    addServiceConnectListener((FileDownloadConnectListener) mLostConnectedHandler);
                 }
-
-
-                stackTopTask
-                        .addFinishListener(serialFinishListener.setNextIndex(runningIndex + 1))
-                        .start();
-
-            } else if (msg.what == WHAT_FREEZE) {
-                freeze();
-            } else if (msg.what == WHAT_UNFREEZE) {
-                unfreeze();
-            }
-            return true;
-        }
-
-        public void freeze() {
-            list.get(runningIndex).removeFinishListener(serialFinishListener);
-            handler.removeCallbacksAndMessages(null);
-        }
-
-        public void unfreeze() {
-            goNext(runningIndex);
-        }
-
-        private void goNext(final int nextIndex) {
-            if (this.handler == null || this.list == null) {
-                FileDownloadLog.w(this, "need go next %d, but params is not ready %s %s",
-                        nextIndex, this.handler, this.list);
-                return;
-            }
-
-            Message nextMsg = this.handler.obtainMessage();
-            nextMsg.what = WHAT_SERIAL_NEXT;
-            nextMsg.arg1 = nextIndex;
-            if (FileDownloadLog.NEED_LOG) {
-                FileDownloadLog.d(SerialHandlerCallback.class, "start next %s %s",
-                        this.list == null ? null : this.list.get(0) == null ? null :
-                                this.list.get(0).getListener(), nextMsg.arg1);
-            }
-            this.handler.sendMessage(nextMsg);
-        }
-    }
-
-    private static class SerialFinishListener implements BaseDownloadTask.FinishListener {
-        private final WeakReference<SerialHandlerCallback> wSerialHandlerCallback;
-
-        private SerialFinishListener(WeakReference<SerialHandlerCallback> wSerialHandlerCallback) {
-            this.wSerialHandlerCallback = wSerialHandlerCallback;
-        }
-
-        private int nextIndex;
-
-        public BaseDownloadTask.FinishListener setNextIndex(int index) {
-            this.nextIndex = index;
-            return this;
-        }
-
-        @Override
-        public void over(final BaseDownloadTask task) {
-            if (wSerialHandlerCallback != null && wSerialHandlerCallback.get() != null) {
-                wSerialHandlerCallback.get().goNext(this.nextIndex);
             }
         }
+
+        return mLostConnectedHandler;
     }
 
-    static void freezeSerialHandler(Handler handler) {
-        handler.sendEmptyMessage(WHAT_FREEZE);
-    }
 
-    static void unFreezeSerialHandler(Handler handler) {
-        handler.sendEmptyMessage(WHAT_UNFREEZE);
-    }
 }

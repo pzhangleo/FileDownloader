@@ -23,8 +23,6 @@ import com.liulishuo.filedownloader.services.FDServiceSharedHandler;
 import com.liulishuo.filedownloader.util.FileDownloadProperties;
 
 /**
- * Created by Jacksgong on 4/17/16.
- * <p/>
  * The proxy used for executing the action from FileDownloader to FileDownloadService.
  *
  * @see FileDownloadServiceSharedTransmit In case of FileDownloadService runs in the main process.
@@ -61,9 +59,11 @@ public class FileDownloadServiceProxy implements IFileDownloadServiceProxy {
     @Override
     public boolean start(String url, String path, boolean pathAsDirectory, int callbackProgressTimes,
                          int callbackProgressMinIntervalMillis,
-                         int autoRetryTimes, boolean forceReDownload, FileDownloadHeader header) {
+                         int autoRetryTimes, boolean forceReDownload, FileDownloadHeader header,
+                         boolean isWifiRequired) {
         return handler.start(url, path, pathAsDirectory, callbackProgressTimes,
-                callbackProgressMinIntervalMillis, autoRetryTimes, forceReDownload, header);
+                callbackProgressMinIntervalMillis, autoRetryTimes, forceReDownload, header,
+                isWifiRequired);
     }
 
     @Override
@@ -134,5 +134,15 @@ public class FileDownloadServiceProxy implements IFileDownloadServiceProxy {
     @Override
     public boolean setMaxNetworkThreadCount(int count) {
         return handler.setMaxNetworkThreadCount(count);
+    }
+
+    @Override
+    public boolean clearTaskData(int id) {
+        return handler.clearTaskData(id);
+    }
+
+    @Override
+    public void clearAllTaskData() {
+        handler.clearAllTaskData();
     }
 }
